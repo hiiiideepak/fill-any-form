@@ -26,4 +26,4 @@ After changing the extension files, press the refresh icon for it on `chrome://e
 
 ## MVP notes
 
-This supports ordinary inputs, textareas, and native select menus. Highly custom fields (for example, React comboboxes) may need a dedicated adapter in a next iteration.
+This supports ordinary inputs, textareas, native select menus, `<datalist>` inputs, and custom dropdowns (React Select, Greenhouse/Workday-style comboboxes). For dropdowns it never types raw text: it picks the closest matching option (exact, prefix, substring, yes/no, then keyword overlap) and, for custom widgets, opens the menu, filters, and clicks the option. Dropdowns with no acceptable option are left untouched and reported in the result line.
