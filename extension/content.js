@@ -46,10 +46,122 @@ function setValue(el, value) {
   el.dispatchEvent(new Event("input", { bubbles: true })); el.dispatchEvent(new Event("change", { bubbles: true }));
   el.style.outline = "2px solid #7658ff"; el.style.outlineOffset = "1px";
 }
+const highlight = (el) => { if (!el) return; el.style.outline = "2px solid #7658ff"; el.style.outlineOffset = "1px"; };
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+const YES = ["yes", "true", "y", "i am", "authorized", "authorised", "eligible"];
+const NO = ["no", "false", "n", "not authorized", "do not", "don t"];
+
+// Rank how well an option text matches the desired value. -1 = no match.
+function scoreOption(optionText, target) {
+  const option = normalize(optionText);
+  if (!option || option === "select" || option === "please select") return -1;
+  if (option === target) return 100;
+  if (option.startsWith(target) || target.startsWith(option)) return 80;
+  if (option.includes(target) || target.includes(option)) return 60;
+  const isYes = (t) => YES.some(w => t === w || t.startsWith(w + " "));
+  const isNo = (t) => NO.some(w => t === w || t.startsWith(w + " "));
+  if (isYes(target) && isYes(option)) return 50;
+  if (isNo(target) && isNo(option)) return 50;
+  const words = target.split(" ").filter(w => w.length > 2);
+  const hits = words.filter(w => option.includes(w)).length;
+  if (words.length && hits / words.length >= 0.6) return 30 + hits;
+  return -1;
+}
+
+function bestMatch(items, getText, target) {
+  let best = null, bestScore = 0;
+  for (const item of items) {
+    const score = scoreOption(getText(item), target);
+    if (score > bestScore) { best = item; bestScore = score; }
+  }
+  return best;
+}
+
+// Native <select>: pick the closest option and fire the events frameworks listen for.
 function chooseSelect(el, value) {
   const target = normalize(value);
-  const option = [...el.options].find(o => normalize(o.text).includes(target) || target.includes(normalize(o.text)) || normalize(o.value) === target);
-  if (!option) return false; el.value = option.value; el.dispatchEvent(new Event("input", { bubbles: true })); el.dispatchEvent(new Event("change", { bubbles: true })); el.style.outline = "2px solid #7658ff"; return true;
+  const option =
+    bestMatch([...el.options], o => o.text, target) ||
+    [...el.options].find(o => normalize(o.value) === target);
+  if (!option) return false;
+  const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
+  setter ? setter.call(el, option.value) : (el.value = option.value);
+  el.selectedIndex = option.index;
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+  el.dispatchEvent(new Event("change", { bubbles: true }));
+  highlight(el);
+  return true;
+}
+
+// Inputs backed by a <datalist> behave like a dropdown: snap to a listed option.
+function chooseDatalist(el, value) {
+  const list = el.list; if (!list) return false;
+  const target = normalize(value);
+  const option = bestMatch([...list.options], o => o.label || o.value, target);
+  if (!option) return false;
+  setValue(el, option.value);
+  return true;
+}
+
+const COMBO_SELECTOR = [
+  '[role="combobox"]', '[role="listbox"]', '[aria-haspopup="listbox"]', '[aria-haspopup="true"]',
+  '.select__control', '.select-shell', '.chosen-container', '.select2-container', '[class*="Select__control"]'
+].join(",");
+const OPTION_SELECTOR = [
+  '[role="option"]', '.select__option', '[class*="Select__option"]',
+  '.select2-results__option', '.chosen-results li', 'ul[class*="menu"] li', 'li[id*="option"]'
+].join(",");
+
+function comboboxFor(el) {
+  if (el.matches(COMBO_SELECTOR)) return el;
+  const container = el.closest('[data-testid], .field, .select-shell, .select__control, [class*="Select"], div');
+  return container?.querySelector(COMBO_SELECTOR) || null;
+}
+
+function visibleOptions() {
+  return [...document.querySelectorAll(OPTION_SELECTOR)].filter(o => {
+    const rect = o.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && o.getAttribute("aria-disabled") !== "true";
+  });
+}
+
+// Custom widgets (React Select, Greenhouse/Workday, Select2...) need real interaction:
+// open the menu, type to filter, then click the matching option.
+async function chooseCustomDropdown(el, value) {
+  const combo = comboboxFor(el);
+  if (!combo) return false;
+  const target = normalize(value);
+  const typeable = combo.matches("input") ? combo : combo.querySelector("input:not([type=hidden])");
+
+  combo.scrollIntoView({ block: "center" });
+  (typeable || combo).focus();
+  ["pointerdown", "mousedown", "mouseup", "click"].forEach(type =>
+    combo.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }))
+  );
+  await sleep(150);
+
+  if (typeable && !typeable.readOnly) {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    setter ? setter.call(typeable, String(value)) : (typeable.value = String(value));
+    typeable.dispatchEvent(new Event("input", { bubbles: true }));
+    await sleep(250);
+  }
+
+  let options = visibleOptions();
+  if (!options.length) { await sleep(300); options = visibleOptions(); }
+  const option = bestMatch(options, o => o.innerText || o.textContent, target);
+  if (!option) {
+    (typeable || combo).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    return false;
+  }
+
+  ["pointerdown", "mousedown", "mouseup", "click"].forEach(type =>
+    option.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }))
+  );
+  await sleep(120);
+  highlight(combo);
+  return true;
 }
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "GET_PAGE_FIELDS") {
@@ -64,16 +176,38 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return;
   }
   if (message.type !== "FILL_FORM") return;
-  chrome.storage.local.get("profile").then(({ profile = {} }) => {
-    let filled = 0, skippedFiles = 0;
-    document.querySelectorAll("input, textarea, select").forEach(el => {
-      if (el.disabled || el.readOnly || el.value || el.type === "hidden") return;
-      if (el.type === "file") { skippedFiles++; return; }
-      if (["checkbox", "radio", "submit", "button", "reset", "password"].includes(el.type)) return;
-      const value = findValue(fieldText(el), profile); if (!value) return;
-      if (el.tagName === "SELECT" ? chooseSelect(el, value) : (setValue(el, value), true)) filled++;
+  (async () => {
+    const { profile = {} } = await chrome.storage.local.get("profile");
+    let filled = 0, skippedFiles = 0, unmatchedDropdowns = 0;
+    const elements = [...document.querySelectorAll("input, textarea, select, [role=combobox]")];
+    for (const el of elements) {
+      if (el.disabled || el.type === "hidden") continue;
+      if (el.type === "file") { skippedFiles++; continue; }
+      if (["checkbox", "radio", "submit", "button", "reset", "password"].includes(el.type)) continue;
+      const isSelect = el.tagName === "SELECT";
+      const isCombo = !isSelect && (el.getAttribute("role") === "combobox" || el.getAttribute("aria-haspopup") === "listbox" || !!el.list);
+      if (!isSelect && !isCombo && (el.readOnly || el.value)) continue;
+      if (isSelect && el.selectedIndex > 0 && el.value) continue;
+      if (isCombo && el.value) continue;
+      const value = findValue(fieldText(el), profile);
+      if (!value) continue;
+
+      let done = false;
+      if (isSelect) {
+        done = chooseSelect(el, value) || await chooseCustomDropdown(el, value);
+      } else if (isCombo) {
+        done = (el.list ? chooseDatalist(el, value) : false) || await chooseCustomDropdown(el, value);
+        if (!done && !el.readOnly) { setValue(el, value); done = true; }
+      } else {
+        setValue(el, value); done = true;
+      }
+      done ? filled++ : unmatchedDropdowns++;
+    }
+    sendResponse({
+      message: `Filled ${filled} field${filled === 1 ? "" : "s"}.` +
+        (unmatchedDropdowns ? ` ${unmatchedDropdowns} dropdown${unmatchedDropdowns === 1 ? "" : "s"} had no matching option.` : "") +
+        (skippedFiles ? " File uploads still need to be selected manually." : "")
     });
-    sendResponse({ message: `Filled ${filled} field${filled === 1 ? "" : "s"}.${skippedFiles ? " File uploads still need to be selected manually." : ""}` });
-  });
+  })();
   return true;
 });
