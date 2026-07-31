@@ -11,7 +11,7 @@ When an application is open, choose **Sync missing fields from this page** in My
 1. Open `chrome://extensions`.
 2. Enable **Developer mode**.
 3. Choose **Load unpacked**.
-4. Select this `job-application-autofill-extension` folder.
+4. Select this `fill-any-form` folder.
 5. Pin **Application Assistant**, visit an application form, and use the extension.
 
 After changing the extension files, press the refresh icon for it on `chrome://extensions`. The extension can now inject itself into an already-open normal webpage; reload the website if Chrome still shows a blocked-page notice.
