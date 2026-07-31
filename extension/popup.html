@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Application Assistant</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="mark">A</div>
+        <div><h1>Application Assistant</h1><p>Fill forms from your saved profile</p></div>
+      </header>
+
+      <div class="tabs" role="tablist">
+        <button class="tab active" data-tab="fill" role="tab">Fill page</button>
+        <button class="tab" data-tab="profile" role="tab">My profile</button>
+      </div>
+
+      <section id="fill" class="panel active" role="tabpanel">
+        <div class="callout">
+          <strong>Ready when you are.</strong>
+          <span>Open an application form, then fill the fields we can identify.</span>
+        </div>
+        <button id="fillPage" class="primary">Fill this page</button>
+        <p id="result" class="result" aria-live="polite">Nothing filled yet.</p>
+        <div class="privacy"><strong>Private by design</strong><br />Your profile stays in Chrome's local extension storage. This extension never submits a form.</div>
+      </section>
+
+      <section id="profile" class="panel" role="tabpanel">
+        <form id="profileForm">
+          <h2>Contact</h2>
+          <div class="grid">
+            <label>First name<input name="firstName" autocomplete="given-name" /></label>
+            <label>Last name<input name="lastName" autocomplete="family-name" /></label>
+          </div>
+          <label>Full name<input name="fullName" autocomplete="name" /></label>
+          <label>Email<input name="email" type="email" autocomplete="email" /></label>
+          <label>Phone<input name="phone" type="tel" autocomplete="tel" /></label>
+          <label>Address<input name="address" autocomplete="street-address" /></label>
+          <div class="grid">
+            <label>City<input name="city" autocomplete="address-level2" /></label>
+            <label>State / region<input name="state" autocomplete="address-level1" /></label>
+          </div>
+          <div class="grid">
+            <label>Postal code<input name="postalCode" autocomplete="postal-code" /></label>
+            <label>Country<input name="country" autocomplete="country-name" /></label>
+          </div>
+
+          <h2>Professional</h2>
+          <label>LinkedIn URL<input name="linkedin" type="url" /></label>
+          <label>Portfolio / website<input name="website" type="url" /></label>
+          <label>Current company<input name="currentCompany" /></label>
+          <label>Current title<input name="currentTitle" /></label>
+          <label>Years of experience<input name="yearsExperience" type="number" min="0" step="0.5" /></label>
+          <label>Work authorization<select name="workAuthorization"><option value="">Choose one</option><option>Yes</option><option>No</option><option>Will require sponsorship</option></select></label>
+          <label>Cover letter<textarea name="coverLetter" rows="4"></textarea></label>
+
+          <h2>Dynamic application fields</h2>
+          <p class="hint">Create any field you need—such as resignation date, salary, or a screening response. Use the wording from the form wherever possible.</p>
+          <div id="customFields"></div>
+          <div class="button-row"><button type="button" id="addCustom" class="secondary">+ Add field</button><button type="button" id="addStarter" class="secondary">Add my job prompts</button><button type="button" id="syncPageFields" class="secondary">Sync missing fields from this page</button></div>
+          <p class="storage-note">Saved locally in Chrome and retained across browser sessions.</p>
+          <button type="submit" class="primary save">Save profile</button>
+          <p id="saveStatus" class="result" aria-live="polite"></p>
+        </form>
+      </section>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

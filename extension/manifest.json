@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Application Assistant",
+  "version": "0.1.0",
+  "description": "Locally save a job application profile and fill common web form fields on demand.",
+  "permissions": ["storage", "activeTab", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_title": "Application Assistant",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
