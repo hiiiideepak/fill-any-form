@@ -45,6 +45,37 @@ async function loadProfile() {
   (profile.custom || []).forEach(({ label, value, type }) => customRow(label, value, type));
 }
 
+// Resume: stored separately from the profile so a large file never bloats profile saves.
+const MAX_RESUME_BYTES = 8 * 1024 * 1024;
+function showResume(resume) {
+  $("#resumeName").textContent = resume?.name ? `Saved: ${resume.name}` : "No resume saved yet.";
+  $("#removeResume").hidden = !resume?.name;
+}
+async function loadResume() {
+  const { resume } = await chrome.storage.local.get("resume");
+  showResume(resume);
+}
+$("#resumeFile").addEventListener("change", async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  if (file.size > MAX_RESUME_BYTES) { $("#saveStatus").textContent = "That file is larger than 8 MB. Please upload a smaller resume."; event.target.value = ""; return; }
+  const dataUrl = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result); reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+  const resume = { name: file.name, type: file.type || "application/octet-stream", dataUrl };
+  await chrome.storage.local.set({ resume });
+  showResume(resume);
+  $("#saveStatus").textContent = "Resume saved locally.";
+});
+$("#removeResume").addEventListener("click", async () => {
+  await chrome.storage.local.remove("resume");
+  $("#resumeFile").value = "";
+  showResume(null);
+  $("#saveStatus").textContent = "Resume removed.";
+});
+
 $("#addCustom").addEventListener("click", () => customRow());
 $("#addStarter").addEventListener("click", () => {
   const existing = new Set([...document.querySelectorAll(".custom-label")].map(el => normalizeLabel(el.value)));
@@ -107,3 +138,4 @@ $("#fillPage").addEventListener("click", async () => {
 
 document.querySelectorAll(".tab").forEach(tab => tab.addEventListener("click", () => { document.querySelectorAll(".tab, .panel").forEach(el => el.classList.remove("active")); tab.classList.add("active"); $(`#${tab.dataset.tab}`).classList.add("active"); }));
 loadProfile();
+loadResume();
