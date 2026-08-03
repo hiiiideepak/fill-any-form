@@ -47,6 +47,40 @@ function setValue(el, value) {
   el.style.outline = "2px solid #7658ff"; el.style.outlineOffset = "1px";
 }
 const highlight = (el) => { if (!el) return; el.style.outline = "2px solid #7658ff"; el.style.outlineOffset = "1px"; };
+
+// Resume upload: rebuild the stored file and hand it to the page's file input
+// through a DataTransfer, which is the only way to set input.files.
+const RESUME_HINT = /(resume|cv|curriculum vitae|attach|upload|document|file)/;
+function dataUrlToFile(dataUrl, name, type) {
+  const base64 = String(dataUrl).split(",")[1] || "";
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new File([bytes], name, { type: type || "application/octet-stream" });
+}
+function attachResume(el, resume) {
+  if (!resume?.dataUrl) return false;
+  if (el.files?.length) return false;
+  const text = fieldText(el);
+  const accept = String(el.accept || "").toLowerCase();
+  const wanted = !text || RESUME_HINT.test(text);
+  if (!wanted) return false;
+  if (accept && accept !== "*/*") {
+    const extension = "." + String(resume.name).split(".").pop().toLowerCase();
+    const tokens = accept.split(",").map(t => t.trim());
+    const ok = tokens.some(t => t === extension || t === resume.type || (t.endsWith("/*") && resume.type.startsWith(t.slice(0, -1))));
+    if (!ok) return false;
+  }
+  try {
+    const transfer = new DataTransfer();
+    transfer.items.add(dataUrlToFile(resume.dataUrl, resume.name, resume.type));
+    el.files = transfer.files;
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    highlight(el);
+    return true;
+  } catch { return false; }
+}
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 const YES = ["yes", "true", "y", "i am", "authorized", "authorised", "eligible"];
@@ -177,12 +211,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (message.type !== "FILL_FORM") return;
   (async () => {
-    const { profile = {} } = await chrome.storage.local.get("profile");
-    let filled = 0, skippedFiles = 0, unmatchedDropdowns = 0;
+    const { profile = {}, resume } = await chrome.storage.local.get(["profile", "resume"]);
+    let filled = 0, skippedFiles = 0, unmatchedDropdowns = 0, resumesAttached = 0;
     const elements = [...document.querySelectorAll("input, textarea, select, [role=combobox]")];
     for (const el of elements) {
       if (el.disabled || el.type === "hidden") continue;
-      if (el.type === "file") { skippedFiles++; continue; }
+      if (el.type === "file") { attachResume(el, resume) ? resumesAttached++ : skippedFiles++; continue; }
       if (["checkbox", "radio", "submit", "button", "reset", "password"].includes(el.type)) continue;
       const isSelect = el.tagName === "SELECT";
       const isCombo = !isSelect && (el.getAttribute("role") === "combobox" || el.getAttribute("aria-haspopup") === "listbox" || !!el.list);
@@ -205,8 +239,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
     sendResponse({
       message: `Filled ${filled} field${filled === 1 ? "" : "s"}.` +
+        (resumesAttached ? ` Resume attached to ${resumesAttached} upload field${resumesAttached === 1 ? "" : "s"}.` : "") +
         (unmatchedDropdowns ? ` ${unmatchedDropdowns} dropdown${unmatchedDropdowns === 1 ? "" : "s"} had no matching option.` : "") +
-        (skippedFiles ? " File uploads still need to be selected manually." : "")
+        (skippedFiles ? ` ${skippedFiles} file upload${skippedFiles === 1 ? "" : "s"} still need${skippedFiles === 1 ? "s" : ""} to be selected manually.` : "")
     });
   })();
   return true;
