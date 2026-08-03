@@ -27,7 +27,8 @@ function Index() {
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col justify-center gap-6 px-6 py-16">
       <h1 className="text-3xl font-semibold">Application Assistant</h1>
       <p className="text-muted-foreground">
-        This repository is the Chrome extension. The files in the project root
+        This repository is the Chrome extension. The files in the{" "}
+        <code>extension</code> folder
         (<code>manifest.json</code>, <code>popup.html</code>, <code>popup.js</code>,{" "}
         <code>popup.css</code>, <code>content.js</code>) are everything you need.
       </p>
