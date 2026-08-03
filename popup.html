@@ -57,6 +57,11 @@
           <label>Work authorization<select name="workAuthorization"><option value="">Choose one</option><option>Yes</option><option>No</option><option>Will require sponsorship</option></select></label>
           <label>Cover letter<textarea name="coverLetter" rows="4"></textarea></label>
 
+          <h2>Resume</h2>
+          <p class="hint">Upload your resume once. It gets attached to resume/CV upload fields when you fill a form.</p>
+          <label>Resume file<input type="file" id="resumeFile" accept=".pdf,.doc,.docx,.rtf,.txt" /></label>
+          <div class="resume-row"><span id="resumeName">No resume saved yet.</span><button type="button" id="removeResume" class="secondary">Remove</button></div>
+
           <h2>Dynamic application fields</h2>
           <p class="hint">Create any field you need—such as resignation date, salary, or a screening response. Use the wording from the form wherever possible.</p>
           <div id="customFields"></div>
