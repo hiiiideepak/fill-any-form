@@ -34,7 +34,7 @@ function Index() {
       <ol className="list-decimal space-y-2 pl-6">
         <li>Open <code>chrome://extensions</code></li>
         <li>Enable Developer mode</li>
-        <li>Click "Load unpacked" and select this project folder</li>
+        <li>Click "Load unpacked" and select the <code>extension</code> folder</li>
         <li>Open the extension popup, save your profile and upload your resume</li>
       </ol>
     </main>
