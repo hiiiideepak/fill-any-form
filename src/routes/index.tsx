@@ -1,24 +1,42 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-// No head() here: the home route inherits title/description/og/twitter from
-// __root.tsx, and ships no og:image so serve-time hosting can inject the
-// project's social preview (explicit og:image or latest screenshot).
 export const Route = createFileRoute("/")({
+  head: () => ({
+    meta: [
+      { title: "Application Assistant — Chrome Extension" },
+      {
+        name: "description",
+        content:
+          "Install the Application Assistant Chrome extension to autofill job applications, select dropdown values and attach your resume.",
+      },
+      { property: "og:title", content: "Application Assistant — Chrome Extension" },
+      {
+        property: "og:description",
+        content:
+          "Autofill job applications, handle dropdowns and attach your saved resume automatically.",
+      },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
+    ],
+  }),
   component: Index,
 });
 
-// IMPORTANT: Replace this placeholder. See ./README.md for routing conventions.
 function Index() {
   return (
-    <div
-      className="flex min-h-screen items-center justify-center"
-      style={{ backgroundColor: "#fcfbf8" }}
-    >
-      <img
-        data-lovable-blank-page-placeholder="REMOVE_THIS"
-        src="https://cdn.gpteng.co/blank-app-v1.svg"
-        alt="Your app will live here!"
-      />
-    </div>
+    <main className="mx-auto flex min-h-screen max-w-2xl flex-col justify-center gap-6 px-6 py-16">
+      <h1 className="text-3xl font-semibold">Application Assistant</h1>
+      <p className="text-muted-foreground">
+        This repository is the Chrome extension. The files in the project root
+        (<code>manifest.json</code>, <code>popup.html</code>, <code>popup.js</code>,{" "}
+        <code>popup.css</code>, <code>content.js</code>) are everything you need.
+      </p>
+      <ol className="list-decimal space-y-2 pl-6">
+        <li>Open <code>chrome://extensions</code></li>
+        <li>Enable Developer mode</li>
+        <li>Click "Load unpacked" and select this project folder</li>
+        <li>Open the extension popup, save your profile and upload your resume</li>
+      </ol>
+    </main>
   );
 }
