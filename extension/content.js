@@ -94,6 +94,52 @@ const safe = (fn, fallback = false) => { try { return fn(); } catch { return fal
 const YES = ["yes", "true", "y", "i am", "authorized", "authorised", "eligible"];
 const NO = ["no", "false", "n", "not authorized", "do not", "don t"];
 
+// The question a radio/checkbox answers usually lives on its fieldset legend,
+// radiogroup label, or a heading right above the option list.
+function groupLabel(el) {
+  const group = el.closest('fieldset, [role=radiogroup], [role=group]');
+  const legend = group?.querySelector("legend")?.innerText;
+  const groupLabelled = group?.getAttribute("aria-labelledby");
+  const groupAria = group?.getAttribute("aria-label") || (groupLabelled && document.getElementById(groupLabelled)?.innerText) || "";
+  const container = el.closest("div, li, section");
+  const heading = container?.querySelector("label, legend, h1, h2, h3, h4, h5, h6, p, span")?.innerText;
+  const own = fieldLabel(el);
+  const text = legend || groupAria || heading || own || el.name || "";
+  return String(text).replace(/\s+/g, " ").trim().slice(0, 160);
+}
+
+// Radio: pick the option in the group whose own label matches the saved value.
+// Checkbox: treat the value as yes/no unless it names this specific option.
+function toggleChoice(el, value) {
+  const target = normalize(value);
+  if (!target) return false;
+  const click = (node) => {
+    if (node.checked && node.type === "radio") return true;
+    node.click();
+    if (node.checked !== true && node.type !== "radio") { node.checked = true; }
+    node.dispatchEvent(new Event("input", { bubbles: true }));
+    node.dispatchEvent(new Event("change", { bubbles: true }));
+    highlight(node.closest("label") || node);
+    return true;
+  };
+  if (el.type === "radio") {
+    const group = el.name
+      ? [...document.querySelectorAll(`input[type=radio][name="${CSS.escape(el.name)}"]`)]
+      : [el];
+    if (group.some(r => r.checked)) return false;
+    const match = bestMatch(group, r => fieldLabel(r) || r.value, target);
+    return match ? click(match) : false;
+  }
+  const own = normalize(fieldLabel(el) || el.value);
+  const wantsYes = YES.some(w => target === w || target.startsWith(w + " "));
+  const wantsNo = NO.some(w => target === w || target.startsWith(w + " "));
+  const optionMatch = own && scoreOption(own, target) > 0;
+  if (wantsNo && !optionMatch) return false;
+  if (!wantsYes && !optionMatch) return false;
+  if (el.checked) return false;
+  return click(el);
+}
+
 // Rank how well an option text matches the desired value. -1 = no match.
 function scoreOption(optionText, target) {
   const option = normalize(optionText);
