@@ -350,10 +350,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       push(fieldLabel(el));
     });
     // Custom (non-native) toggles and dropdown buttons used by modern ATS forms.
-    document.querySelectorAll('[role=radio], [role=checkbox], [role=switch], [role=radiogroup], button[aria-haspopup], [role=button][aria-haspopup]').forEach(el => {
+    document.querySelectorAll('[role=radio], [role=checkbox], [role=switch]').forEach(el => {
+      if (el.getAttribute("aria-disabled") === "true") return;
+      const members = groupMembers(el);
+      if (members[0] !== el) return;
+      push(groupLabel(el), members.map(nodeText).filter(Boolean));
+    });
+    document.querySelectorAll('[role=radiogroup], button[aria-haspopup], [role=button][aria-haspopup]').forEach(el => {
       if (el.getAttribute("aria-disabled") === "true") return;
       push(groupLabel(el));
     });
+    // Segmented answers rendered as plain buttons (e.g. a Yes / No pair).
+    buttonGroups().forEach(({ buttons }) => push(groupLabel(buttons[0]), buttons.map(nodeText)));
     sendResponse({ fields, companyTerms: companyTerms() });
     return;
   }
