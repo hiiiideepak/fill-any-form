@@ -430,6 +430,36 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       done ? filled++ : unmatchedDropdowns++;
       } catch { errored++; }
     }
+    // Custom option widgets: role=radio/checkbox nodes and plain button pairs.
+    const clickNode = (node) => {
+      ["pointerdown", "mousedown", "mouseup", "click"].forEach(type =>
+        node.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }))
+      );
+      highlight(node);
+    };
+    const customGroups = safe(() => {
+      const seen = new Set();
+      const groups = [];
+      document.querySelectorAll('[role=radio], [role=checkbox], [role=switch]').forEach(el => {
+        if (el.getAttribute("aria-disabled") === "true" || seen.has(el)) return;
+        const members = groupMembers(el);
+        members.forEach(m => seen.add(m));
+        groups.push(members.filter(m => !(m instanceof HTMLInputElement)));
+      });
+      buttonGroups().forEach(({ buttons }) => groups.push(buttons));
+      return groups.filter(members => members.length > 1);
+    }, []);
+    for (const members of customGroups) {
+      try {
+        if (members.some(m => m.getAttribute("aria-checked") === "true" || m.getAttribute("aria-pressed") === "true")) continue;
+        const value = safe(() => findValue(normalize(groupLabel(members[0])), profile), "");
+        if (!value) continue;
+        const match = bestMatch(members, nodeText, normalize(value));
+        if (!match) { unmatchedDropdowns++; continue; }
+        clickNode(match);
+        filled++;
+      } catch { errored++; }
+    }
     sendResponse({
       message: `Filled ${filled} field${filled === 1 ? "" : "s"}.` +
         (resumesAttached ? ` Resume attached to ${resumesAttached} upload field${resumesAttached === 1 ? "" : "s"}.` : "") +
