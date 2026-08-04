@@ -94,6 +94,52 @@ const safe = (fn, fallback = false) => { try { return fn(); } catch { return fal
 const YES = ["yes", "true", "y", "i am", "authorized", "authorised", "eligible"];
 const NO = ["no", "false", "n", "not authorized", "do not", "don t"];
 
+// The question a radio/checkbox answers usually lives on its fieldset legend,
+// radiogroup label, or a heading right above the option list.
+function groupLabel(el) {
+  const group = el.closest('fieldset, [role=radiogroup], [role=group]');
+  const legend = group?.querySelector("legend")?.innerText;
+  const groupLabelled = group?.getAttribute("aria-labelledby");
+  const groupAria = group?.getAttribute("aria-label") || (groupLabelled && document.getElementById(groupLabelled)?.innerText) || "";
+  const container = el.closest("div, li, section");
+  const heading = container?.querySelector("label, legend, h1, h2, h3, h4, h5, h6, p, span")?.innerText;
+  const own = fieldLabel(el);
+  const text = legend || groupAria || heading || own || el.name || "";
+  return String(text).replace(/\s+/g, " ").trim().slice(0, 160);
+}
+
+// Radio: pick the option in the group whose own label matches the saved value.
+// Checkbox: treat the value as yes/no unless it names this specific option.
+function toggleChoice(el, value) {
+  const target = normalize(value);
+  if (!target) return false;
+  const click = (node) => {
+    if (node.checked && node.type === "radio") return true;
+    node.click();
+    if (node.checked !== true && node.type !== "radio") { node.checked = true; }
+    node.dispatchEvent(new Event("input", { bubbles: true }));
+    node.dispatchEvent(new Event("change", { bubbles: true }));
+    highlight(node.closest("label") || node);
+    return true;
+  };
+  if (el.type === "radio") {
+    const group = el.name
+      ? [...document.querySelectorAll(`input[type=radio][name="${CSS.escape(el.name)}"]`)]
+      : [el];
+    if (group.some(r => r.checked)) return false;
+    const match = bestMatch(group, r => fieldLabel(r) || r.value, target);
+    return match ? click(match) : false;
+  }
+  const own = normalize(fieldLabel(el) || el.value);
+  const wantsYes = YES.some(w => target === w || target.startsWith(w + " "));
+  const wantsNo = NO.some(w => target === w || target.startsWith(w + " "));
+  const optionMatch = own && scoreOption(own, target) > 0;
+  if (wantsNo && !optionMatch) return false;
+  if (!wantsYes && !optionMatch) return false;
+  if (el.checked) return false;
+  return click(el);
+}
+
 // Rank how well an option text matches the desired value. -1 = no match.
 function scoreOption(optionText, target) {
   const option = normalize(optionText);
@@ -209,10 +255,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "GET_PAGE_FIELDS") {
     const seen = new Set();
     const fields = [];
+    const push = (label) => {
+      const key = normalize(label);
+      if (key && !seen.has(key)) { seen.add(key); fields.push(String(label).replace(/\s+/g, " ").trim()); }
+    };
     document.querySelectorAll("input, textarea, select").forEach(el => {
-      if (el.disabled || el.type === "hidden" || ["file", "checkbox", "radio", "submit", "button", "reset", "password"].includes(el.type)) return;
-      const label = fieldLabel(el), key = normalize(label);
-      if (key && !seen.has(key)) { seen.add(key); fields.push(label); }
+      if (el.disabled || el.type === "hidden" || ["file", "submit", "reset", "password"].includes(el.type)) return;
+      // Radios and checkboxes answer a question stated by their group/fieldset,
+      // not by the individual option text — sync the question instead.
+      if (el.type === "radio" || el.type === "checkbox") { push(groupLabel(el)); return; }
+      if (el.type === "button") { push(fieldLabel(el) || el.value); return; }
+      push(fieldLabel(el));
+    });
+    // Custom (non-native) toggles and dropdown buttons used by modern ATS forms.
+    document.querySelectorAll('[role=radio], [role=checkbox], [role=switch], [role=radiogroup], button[aria-haspopup], [role=button][aria-haspopup]').forEach(el => {
+      if (el.getAttribute("aria-disabled") === "true") return;
+      push(groupLabel(el));
     });
     sendResponse({ fields, companyTerms: companyTerms() });
     return;
@@ -230,7 +288,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (el.disabled || el.type === "hidden") continue;
       // Resume attach is synchronous and fire-and-forget: never await the page.
       if (el.type === "file") { safe(() => attachResume(el, resume)) ? resumesAttached++ : skippedFiles++; continue; }
-      if (["checkbox", "radio", "submit", "button", "reset", "password"].includes(el.type)) continue;
+      if (el.type === "radio" || el.type === "checkbox") {
+        const value = safe(() => findValue(normalize(groupLabel(el)), profile), "");
+        if (!value) continue;
+        safe(() => toggleChoice(el, value)) ? filled++ : null;
+        continue;
+      }
+      if (["submit", "button", "reset", "password"].includes(el.type)) continue;
       const isSelect = el.tagName === "SELECT";
       const isCombo = !isSelect && (el.getAttribute("role") === "combobox" || el.getAttribute("aria-haspopup") === "listbox" || !!el.list);
       if (!isSelect && !isCombo && (el.readOnly || el.value)) continue;
