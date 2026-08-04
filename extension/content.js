@@ -132,11 +132,36 @@ function groupMembers(el) {
   return [el];
 }
 function commonAncestor(nodes) {
+  if (!nodes.length) return null;
   let ancestor = nodes[0]?.parentElement || null;
   for (const node of nodes.slice(1)) {
     while (ancestor && !ancestor.contains(node)) ancestor = ancestor.parentElement;
   }
   return ancestor;
+}
+const nodeText = (el) => String(el?.innerText || el?.textContent || el?.getAttribute?.("aria-label") || el?.value || "").replace(/\s+/g, " ").trim();
+
+// Some forms answer a question with a pair/row of plain buttons (Yes / No,
+// segmented controls) instead of radios. Group those buttons per container.
+function buttonGroups() {
+  const groups = new Map();
+  const candidates = [...document.querySelectorAll('button, [role=button]')].filter(el => {
+    if (el.disabled || el.getAttribute("aria-disabled") === "true" || el.getAttribute("aria-haspopup")) return false;
+    if (el.closest("nav, header, footer")) return false;
+    if (["submit", "reset"].includes(el.type)) return false;
+    const text = nodeText(el);
+    return text.length >= 1 && text.length <= 40;
+  });
+  for (const button of candidates) {
+    const container = button.parentElement;
+    if (!container) continue;
+    if (!groups.has(container)) groups.set(container, []);
+    groups.get(container).push(button);
+  }
+  return [...groups.values()]
+    .filter(buttons => buttons.length >= 2 && buttons.length <= 6)
+    .map(buttons => ({ buttons }))
+    .filter(({ buttons }) => !!questionAbove(buttons[0]));
 }
 // The question text usually sits just above the option list — as a heading,
 // bold label, or plain paragraph that itself contains no form controls.
