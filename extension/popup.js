@@ -120,15 +120,20 @@ $("#profileForm").addEventListener("submit", async (event) => {
 $("#fillPage").addEventListener("click", async () => {
   const result = $("#result"); result.textContent = "Filling fields…";
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  // Hard cap so the popup never sits on "Filling fields…" if the page stalls.
+  const capped = (promise) => Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 30000)),
+  ]);
   try {
     let response;
     try {
-      response = await chrome.tabs.sendMessage(tab.id, { type: "FILL_FORM" });
+      response = await capped(chrome.tabs.sendMessage(tab.id, { type: "FILL_FORM" }));
     } catch {
       // A tab already open when the extension was installed/reloaded has not
       // received its content script. Inject it once, then retry immediately.
       await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
-      response = await chrome.tabs.sendMessage(tab.id, { type: "FILL_FORM" });
+      response = await capped(chrome.tabs.sendMessage(tab.id, { type: "FILL_FORM" }));
     }
     result.textContent = response?.message || "No fillable fields found.";
   } catch {
