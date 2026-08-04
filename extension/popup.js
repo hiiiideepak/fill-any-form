@@ -12,15 +12,21 @@ const starterFields = [
   ["Are you open to working from the Bangalore office (5 days WFO)?", ""]
 ];
 
-function customRow(label = "", value = "", type = "text") {
+function customRow(label = "", value = "", type = "text", options = []) {
   const row = document.createElement("div");
   row.className = "custom-row";
-  row.innerHTML = `<input class="custom-label" placeholder="Field label" value="${escapeHtml(label)}"><select class="custom-type" aria-label="Answer type"><option value="text">Text</option><option value="date">Date</option><option value="longText">Long text</option></select><button class="remove" type="button" aria-label="Remove field">×</button>`;
+  row.innerHTML = `<input class="custom-label" placeholder="Field label" value="${escapeHtml(label)}"><select class="custom-type" aria-label="Answer type"><option value="text">Text</option><option value="date">Date</option><option value="longText">Long text</option><option value="choice">Choice</option></select><button class="remove" type="button" aria-label="Remove field">×</button>`;
+  if (options.length) { type = "choice"; row.dataset.options = JSON.stringify(options); }
   row.querySelector(".custom-type").value = type;
   const renderAnswer = () => {
     row.querySelector(".custom-value")?.remove();
-    const answer = document.createElement(type === "longText" ? "textarea" : "input");
+    const list = JSON.parse(row.dataset.options || "[]");
+    const answer = document.createElement(type === "choice" && list.length ? "select" : type === "longText" ? "textarea" : "input");
     answer.className = "custom-value"; answer.placeholder = "Answer"; answer.value = value;
+    if (answer.tagName === "SELECT") {
+      answer.innerHTML = `<option value="">Select an option…</option>` + list.map(option => `<option value="${escapeHtml(option)}">${escapeHtml(option)}</option>`).join("");
+      answer.value = value;
+    }
     if (type === "date") answer.type = "date";
     row.insertBefore(answer, row.querySelector(".remove"));
   };
@@ -42,7 +48,7 @@ function isReusableField(label, companyTerms = []) {
 async function loadProfile() {
   const { profile = {} } = await chrome.storage.local.get("profile");
   standardFields.forEach((field) => { const input = document.querySelector(`[name="${field}"]`); if (input) input.value = profile[field] || ""; });
-  (profile.custom || []).forEach(({ label, value, type }) => customRow(label, value, type));
+  (profile.custom || []).forEach(({ label, value, type, options }) => customRow(label, value, type, options || []));
 }
 
 // Resume: stored separately from the profile so a large file never bloats profile saves.
@@ -90,11 +96,12 @@ $("#syncPageFields").addEventListener("click", async () => {
     try { response = await chrome.tabs.sendMessage(tab.id, { type: "GET_PAGE_FIELDS" }); }
     catch { await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] }); response = await chrome.tabs.sendMessage(tab.id, { type: "GET_PAGE_FIELDS" }); }
     const existing = new Set([...document.querySelectorAll(".custom-label")].map(el => normalizeLabel(el.value)));
-    const missing = (response?.fields || []).filter(label => {
+    const incoming = (response?.fields || []).map(field => (typeof field === "string" ? { label: field, options: [] } : field));
+    const missing = incoming.filter(({ label }) => {
       const normalized = normalizeLabel(label);
       return normalized && isReusableField(label, response?.companyTerms) && !existing.has(normalized) && !standardFieldTerms.some(term => normalized === term || normalized.includes(term));
     });
-    missing.forEach(label => customRow(label));
+    missing.forEach(({ label, options }) => customRow(label, "", options?.length ? "choice" : "text", options || []));
     if (missing.length) await saveProfile(`Added and saved ${missing.length} new field${missing.length === 1 ? "" : "s"}. Enter answers whenever you're ready.`);
     else status.textContent = "No new fields found on this page.";
   } catch {
@@ -104,7 +111,12 @@ $("#syncPageFields").addEventListener("click", async () => {
 function profileFromForm() {
   const form = new FormData($("#profileForm"));
   const profile = Object.fromEntries(standardFields.map((field) => [field, String(form.get(field) || "").trim()]));
-  profile.custom = [...document.querySelectorAll(".custom-row")].map(row => ({ label: row.querySelector(".custom-label").value.trim(), value: row.querySelector(".custom-value").value.trim(), type: row.querySelector(".custom-type").value })).filter(item => item.label);
+  profile.custom = [...document.querySelectorAll(".custom-row")].map(row => ({
+    label: row.querySelector(".custom-label").value.trim(),
+    value: row.querySelector(".custom-value").value.trim(),
+    type: row.querySelector(".custom-type").value,
+    options: JSON.parse(row.dataset.options || "[]"),
+  })).filter(item => item.label);
   return profile;
 }
 async function saveProfile(message = "Profile saved locally.") {
