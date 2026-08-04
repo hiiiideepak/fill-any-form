@@ -209,10 +209,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "GET_PAGE_FIELDS") {
     const seen = new Set();
     const fields = [];
+    const push = (label) => {
+      const key = normalize(label);
+      if (key && !seen.has(key)) { seen.add(key); fields.push(String(label).replace(/\s+/g, " ").trim()); }
+    };
     document.querySelectorAll("input, textarea, select").forEach(el => {
-      if (el.disabled || el.type === "hidden" || ["file", "checkbox", "radio", "submit", "button", "reset", "password"].includes(el.type)) return;
-      const label = fieldLabel(el), key = normalize(label);
-      if (key && !seen.has(key)) { seen.add(key); fields.push(label); }
+      if (el.disabled || el.type === "hidden" || ["file", "submit", "reset", "password"].includes(el.type)) return;
+      // Radios and checkboxes answer a question stated by their group/fieldset,
+      // not by the individual option text — sync the question instead.
+      if (el.type === "radio" || el.type === "checkbox") { push(groupLabel(el)); return; }
+      if (el.type === "button") { push(fieldLabel(el) || el.value); return; }
+      push(fieldLabel(el));
+    });
+    // Custom (non-native) toggles and dropdown buttons used by modern ATS forms.
+    document.querySelectorAll('[role=radio], [role=checkbox], [role=switch], [role=radiogroup], button[aria-haspopup], [role=button][aria-haspopup]').forEach(el => {
+      if (el.getAttribute("aria-disabled") === "true") return;
+      push(groupLabel(el));
     });
     sendResponse({ fields, companyTerms: companyTerms() });
     return;
@@ -230,7 +242,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (el.disabled || el.type === "hidden") continue;
       // Resume attach is synchronous and fire-and-forget: never await the page.
       if (el.type === "file") { safe(() => attachResume(el, resume)) ? resumesAttached++ : skippedFiles++; continue; }
-      if (["checkbox", "radio", "submit", "button", "reset", "password"].includes(el.type)) continue;
+      if (el.type === "radio" || el.type === "checkbox") {
+        const value = safe(() => findValue(normalize(groupLabel(el)), profile), "");
+        if (!value) continue;
+        safe(() => toggleChoice(el, value)) ? filled++ : null;
+        continue;
+      }
+      if (["submit", "button", "reset", "password"].includes(el.type)) continue;
       const isSelect = el.tagName === "SELECT";
       const isCombo = !isSelect && (el.getAttribute("role") === "combobox" || el.getAttribute("aria-haspopup") === "listbox" || !!el.list);
       if (!isSelect && !isCombo && (el.readOnly || el.value)) continue;
