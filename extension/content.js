@@ -101,11 +101,49 @@ function groupLabel(el) {
   const legend = group?.querySelector("legend")?.innerText;
   const groupLabelled = group?.getAttribute("aria-labelledby");
   const groupAria = group?.getAttribute("aria-label") || (groupLabelled && document.getElementById(groupLabelled)?.innerText) || "";
-  const container = el.closest("div, li, section");
-  const heading = container?.querySelector("label, legend, h1, h2, h3, h4, h5, h6, p, span")?.innerText;
-  const own = fieldLabel(el);
-  const text = legend || groupAria || heading || own || el.name || "";
+  const text = legend || groupAria || questionAbove(el) || fieldLabel(el) || el.name || "";
   return String(text).replace(/\s+/g, " ").trim().slice(0, 160);
+}
+
+// All options that answer the same question (radios share a name; checkboxes
+// share their nearest option container).
+function groupMembers(el) {
+  if (el.type === "radio" && el.name) {
+    return [...document.querySelectorAll(`input[type=radio][name="${CSS.escape(el.name)}"]`)];
+  }
+  return [el];
+}
+function commonAncestor(nodes) {
+  let ancestor = nodes[0]?.parentElement || null;
+  for (const node of nodes.slice(1)) {
+    while (ancestor && !ancestor.contains(node)) ancestor = ancestor.parentElement;
+  }
+  return ancestor;
+}
+// The question text usually sits just above the option list — as a heading,
+// bold label, or plain paragraph that itself contains no form controls.
+function questionAbove(el) {
+  const members = groupMembers(el);
+  let node = commonAncestor(members) || el.parentElement;
+  const optionTexts = new Set(members.map(m => normalize(fieldLabel(m))).filter(Boolean));
+  const usable = (candidate) => {
+    if (!candidate) return "";
+    if (candidate.querySelector("input, select, textarea")) return "";
+    const text = String(candidate.innerText || "").replace(/\s+/g, " ").trim();
+    if (!text || text.length < 3 || text.length > 300) return "";
+    if (optionTexts.has(normalize(text))) return "";
+    return text;
+  };
+  for (let depth = 0; node && node !== document.body && depth < 6; depth++, node = node.parentElement) {
+    const heading = [...node.children].find(child => usable(child) && /^(LEGEND|H1|H2|H3|H4|H5|H6|LABEL|P|STRONG|B|SPAN|DIV)$/.test(child.tagName));
+    const inside = usable(heading);
+    if (inside) return inside;
+    for (let sib = node.previousElementSibling; sib; sib = sib.previousElementSibling) {
+      const text = usable(sib);
+      if (text) return text;
+    }
+  }
+  return "";
 }
 
 // Radio: pick the option in the group whose own label matches the saved value.
@@ -255,15 +293,24 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "GET_PAGE_FIELDS") {
     const seen = new Set();
     const fields = [];
-    const push = (label) => {
+    const push = (label, options = []) => {
       const key = normalize(label);
-      if (key && !seen.has(key)) { seen.add(key); fields.push(String(label).replace(/\s+/g, " ").trim()); }
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        fields.push({ label: String(label).replace(/\s+/g, " ").trim(), options: [...new Set(options.map(o => String(o).replace(/\s+/g, " ").trim()).filter(Boolean))] });
+      }
     };
     document.querySelectorAll("input, textarea, select").forEach(el => {
       if (el.disabled || el.type === "hidden" || ["file", "submit", "reset", "password"].includes(el.type)) return;
       // Radios and checkboxes answer a question stated by their group/fieldset,
-      // not by the individual option text — sync the question instead.
-      if (el.type === "radio" || el.type === "checkbox") { push(groupLabel(el)); return; }
+      // not by the individual option text — sync the question once, with its
+      // options, so the user picks one answer instead of one field per option.
+      if (el.type === "radio" || el.type === "checkbox") {
+        const members = groupMembers(el);
+        if (members[0] !== el) return;
+        push(groupLabel(el), members.map(m => fieldLabel(m) || m.value).filter(Boolean));
+        return;
+      }
       if (el.type === "button") { push(fieldLabel(el) || el.value); return; }
       push(fieldLabel(el));
     });
