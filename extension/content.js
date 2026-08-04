@@ -105,20 +105,63 @@ function groupLabel(el) {
   return String(text).replace(/\s+/g, " ").trim().slice(0, 160);
 }
 
-// All options that answer the same question (radios share a name; checkboxes
-// share their nearest option container).
+// All options that answer the same question. Radios normally share a name, but
+// many ATS forms omit names (or render options as buttons / role=radio nodes),
+// so fall back to every sibling option inside the nearest option container.
+function optionContainer(el) {
+  return el.closest('fieldset, [role=radiogroup], [role=group], [role=listbox]') || (() => {
+    // Walk up until the ancestor holds more than one option-like control.
+    let node = el.parentElement;
+    for (let depth = 0; node && node !== document.body && depth < 5; depth++, node = node.parentElement) {
+      if (node.querySelectorAll('input[type=radio], input[type=checkbox], [role=radio], [role=checkbox]').length > 1) return node;
+    }
+    return null;
+  })();
+}
 function groupMembers(el) {
   if (el.type === "radio" && el.name) {
     return [...document.querySelectorAll(`input[type=radio][name="${CSS.escape(el.name)}"]`)];
   }
+  const container = optionContainer(el);
+  if (container) {
+    const kind = el.getAttribute("role") || el.type;
+    const members = [...container.querySelectorAll('input[type=radio], input[type=checkbox], [role=radio], [role=checkbox]')]
+      .filter(m => (m.getAttribute("role") || m.type) === kind);
+    if (members.length > 1) return members;
+  }
   return [el];
 }
 function commonAncestor(nodes) {
+  if (!nodes.length) return null;
   let ancestor = nodes[0]?.parentElement || null;
   for (const node of nodes.slice(1)) {
     while (ancestor && !ancestor.contains(node)) ancestor = ancestor.parentElement;
   }
   return ancestor;
+}
+const nodeText = (el) => String(el?.innerText || el?.textContent || el?.getAttribute?.("aria-label") || el?.value || "").replace(/\s+/g, " ").trim();
+
+// Some forms answer a question with a pair/row of plain buttons (Yes / No,
+// segmented controls) instead of radios. Group those buttons per container.
+function buttonGroups() {
+  const groups = new Map();
+  const candidates = [...document.querySelectorAll('button, [role=button]')].filter(el => {
+    if (el.disabled || el.getAttribute("aria-disabled") === "true" || el.getAttribute("aria-haspopup")) return false;
+    if (el.closest("nav, header, footer")) return false;
+    if (["submit", "reset"].includes(el.type)) return false;
+    const text = nodeText(el);
+    return text.length >= 1 && text.length <= 40;
+  });
+  for (const button of candidates) {
+    const container = button.parentElement;
+    if (!container) continue;
+    if (!groups.has(container)) groups.set(container, []);
+    groups.get(container).push(button);
+  }
+  return [...groups.values()]
+    .filter(buttons => buttons.length >= 2 && buttons.length <= 6)
+    .map(buttons => ({ buttons }))
+    .filter(({ buttons }) => !!questionAbove(buttons[0]));
 }
 // The question text usually sits just above the option list — as a heading,
 // bold label, or plain paragraph that itself contains no form controls.
@@ -130,11 +173,12 @@ function questionAbove(el) {
     if (!candidate) return "";
     if (candidate.querySelector("input, select, textarea")) return "";
     const text = String(candidate.innerText || "").replace(/\s+/g, " ").trim();
-    if (!text || text.length < 3 || text.length > 300) return "";
+    if (!text || text.length < 3 || text.length > 400) return "";
     if (optionTexts.has(normalize(text))) return "";
     return text;
   };
-  for (let depth = 0; node && node !== document.body && depth < 6; depth++, node = node.parentElement) {
+  const start = node;
+  for (let depth = 0; node && node !== document.body && depth < 8; depth++, node = node.parentElement) {
     const heading = [...node.children].find(child => usable(child) && /^(LEGEND|H1|H2|H3|H4|H5|H6|LABEL|P|STRONG|B|SPAN|DIV)$/.test(child.tagName));
     const inside = usable(heading);
     if (inside) return inside;
@@ -142,6 +186,22 @@ function questionAbove(el) {
       const text = usable(sib);
       if (text) return text;
     }
+  }
+  // Fallback: some forms wrap the question and its options in one block with no
+  // dedicated heading element. Strip every control/option label out of the
+  // block and keep the last remaining line of prose above the options.
+  return questionFromBlock(start, optionTexts);
+}
+function questionFromBlock(start, optionTexts) {
+  let node = start;
+  for (let depth = 0; node && node !== document.body && depth < 6; depth++, node = node.parentElement) {
+    const clone = node.cloneNode(true);
+    clone.querySelectorAll('input, select, textarea, button, label, [role=radio], [role=checkbox], [role=button], legend').forEach(n => n.remove());
+    const lines = String(clone.innerText || clone.textContent || "")
+      .split("\n").map(line => line.replace(/\s+/g, " ").trim())
+      .filter(line => line.length >= 8 && line.length <= 400 && !optionTexts.has(normalize(line)));
+    const text = lines.at(-1);
+    if (text) return text;
   }
   return "";
 }
@@ -315,10 +375,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       push(fieldLabel(el));
     });
     // Custom (non-native) toggles and dropdown buttons used by modern ATS forms.
-    document.querySelectorAll('[role=radio], [role=checkbox], [role=switch], [role=radiogroup], button[aria-haspopup], [role=button][aria-haspopup]').forEach(el => {
+    document.querySelectorAll('[role=radio], [role=checkbox], [role=switch]').forEach(el => {
+      if (el.getAttribute("aria-disabled") === "true") return;
+      const members = groupMembers(el);
+      if (members[0] !== el) return;
+      push(groupLabel(el), members.map(nodeText).filter(Boolean));
+    });
+    document.querySelectorAll('[role=radiogroup], button[aria-haspopup], [role=button][aria-haspopup]').forEach(el => {
       if (el.getAttribute("aria-disabled") === "true") return;
       push(groupLabel(el));
     });
+    // Segmented answers rendered as plain buttons (e.g. a Yes / No pair).
+    buttonGroups().forEach(({ buttons }) => push(groupLabel(buttons[0]), buttons.map(nodeText)));
     sendResponse({ fields, companyTerms: companyTerms() });
     return;
   }
@@ -360,6 +428,36 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         done = safe(() => { setValue(el, value); return true; });
       }
       done ? filled++ : unmatchedDropdowns++;
+      } catch { errored++; }
+    }
+    // Custom option widgets: role=radio/checkbox nodes and plain button pairs.
+    const clickNode = (node) => {
+      ["pointerdown", "mousedown", "mouseup", "click"].forEach(type =>
+        node.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }))
+      );
+      highlight(node);
+    };
+    const customGroups = safe(() => {
+      const seen = new Set();
+      const groups = [];
+      document.querySelectorAll('[role=radio], [role=checkbox], [role=switch]').forEach(el => {
+        if (el.getAttribute("aria-disabled") === "true" || seen.has(el)) return;
+        const members = groupMembers(el);
+        members.forEach(m => seen.add(m));
+        groups.push(members.filter(m => !(m instanceof HTMLInputElement)));
+      });
+      buttonGroups().forEach(({ buttons }) => groups.push(buttons));
+      return groups.filter(members => members.length > 1);
+    }, []);
+    for (const members of customGroups) {
+      try {
+        if (members.some(m => m.getAttribute("aria-checked") === "true" || m.getAttribute("aria-pressed") === "true")) continue;
+        const value = safe(() => findValue(normalize(groupLabel(members[0])), profile), "");
+        if (!value) continue;
+        const match = bestMatch(members, nodeText, normalize(value));
+        if (!match) { unmatchedDropdowns++; continue; }
+        clickNode(match);
+        filled++;
       } catch { errored++; }
     }
     sendResponse({
