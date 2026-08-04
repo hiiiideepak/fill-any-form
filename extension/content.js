@@ -105,11 +105,29 @@ function groupLabel(el) {
   return String(text).replace(/\s+/g, " ").trim().slice(0, 160);
 }
 
-// All options that answer the same question (radios share a name; checkboxes
-// share their nearest option container).
+// All options that answer the same question. Radios normally share a name, but
+// many ATS forms omit names (or render options as buttons / role=radio nodes),
+// so fall back to every sibling option inside the nearest option container.
+function optionContainer(el) {
+  return el.closest('fieldset, [role=radiogroup], [role=group], [role=listbox]') || (() => {
+    // Walk up until the ancestor holds more than one option-like control.
+    let node = el.parentElement;
+    for (let depth = 0; node && node !== document.body && depth < 5; depth++, node = node.parentElement) {
+      if (node.querySelectorAll('input[type=radio], input[type=checkbox], [role=radio], [role=checkbox]').length > 1) return node;
+    }
+    return null;
+  })();
+}
 function groupMembers(el) {
   if (el.type === "radio" && el.name) {
     return [...document.querySelectorAll(`input[type=radio][name="${CSS.escape(el.name)}"]`)];
+  }
+  const container = optionContainer(el);
+  if (container) {
+    const kind = el.getAttribute("role") || el.type;
+    const members = [...container.querySelectorAll('input[type=radio], input[type=checkbox], [role=radio], [role=checkbox]')]
+      .filter(m => (m.getAttribute("role") || m.type) === kind);
+    if (members.length > 1) return members;
   }
   return [el];
 }
@@ -130,11 +148,12 @@ function questionAbove(el) {
     if (!candidate) return "";
     if (candidate.querySelector("input, select, textarea")) return "";
     const text = String(candidate.innerText || "").replace(/\s+/g, " ").trim();
-    if (!text || text.length < 3 || text.length > 300) return "";
+    if (!text || text.length < 3 || text.length > 400) return "";
     if (optionTexts.has(normalize(text))) return "";
     return text;
   };
-  for (let depth = 0; node && node !== document.body && depth < 6; depth++, node = node.parentElement) {
+  const start = node;
+  for (let depth = 0; node && node !== document.body && depth < 8; depth++, node = node.parentElement) {
     const heading = [...node.children].find(child => usable(child) && /^(LEGEND|H1|H2|H3|H4|H5|H6|LABEL|P|STRONG|B|SPAN|DIV)$/.test(child.tagName));
     const inside = usable(heading);
     if (inside) return inside;
@@ -142,6 +161,22 @@ function questionAbove(el) {
       const text = usable(sib);
       if (text) return text;
     }
+  }
+  // Fallback: some forms wrap the question and its options in one block with no
+  // dedicated heading element. Strip every control/option label out of the
+  // block and keep the last remaining line of prose above the options.
+  return questionFromBlock(start, optionTexts);
+}
+function questionFromBlock(start, optionTexts) {
+  let node = start;
+  for (let depth = 0; node && node !== document.body && depth < 6; depth++, node = node.parentElement) {
+    const clone = node.cloneNode(true);
+    clone.querySelectorAll('input, select, textarea, button, label, [role=radio], [role=checkbox], [role=button], legend').forEach(n => n.remove());
+    const lines = String(clone.innerText || clone.textContent || "")
+      .split("\n").map(line => line.replace(/\s+/g, " ").trim())
+      .filter(line => line.length >= 8 && line.length <= 400 && !optionTexts.has(normalize(line)));
+    const text = lines.at(-1);
+    if (text) return text;
   }
   return "";
 }
