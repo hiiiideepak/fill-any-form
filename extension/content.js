@@ -82,6 +82,14 @@ function attachResume(el, resume) {
   } catch { return false; }
 }
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+// Never let one slow/broken widget block the rest of the form.
+function withTimeout(promise, ms, fallback = false) {
+  return Promise.race([
+    Promise.resolve(promise).catch(() => fallback),
+    new Promise(resolve => setTimeout(() => resolve(fallback), ms)),
+  ]);
+}
+const safe = (fn, fallback = false) => { try { return fn(); } catch { return fallback; } };
 
 const YES = ["yes", "true", "y", "i am", "authorized", "authorised", "eligible"];
 const NO = ["no", "false", "n", "not authorized", "do not", "don t"];
@@ -211,36 +219,43 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (message.type !== "FILL_FORM") return;
   (async () => {
-    const { profile = {}, resume } = await chrome.storage.local.get(["profile", "resume"]);
+    const { profile = {}, resume } = await chrome.storage.local
+      .get(["profile", "resume"])
+      .catch(() => ({ profile: {} }));
     let filled = 0, skippedFiles = 0, unmatchedDropdowns = 0, resumesAttached = 0;
-    const elements = [...document.querySelectorAll("input, textarea, select, [role=combobox]")];
+    let errored = 0;
+    const elements = safe(() => [...document.querySelectorAll("input, textarea, select, [role=combobox]")], []);
     for (const el of elements) {
+      try {
       if (el.disabled || el.type === "hidden") continue;
-      if (el.type === "file") { attachResume(el, resume) ? resumesAttached++ : skippedFiles++; continue; }
+      // Resume attach is synchronous and fire-and-forget: never await the page.
+      if (el.type === "file") { safe(() => attachResume(el, resume)) ? resumesAttached++ : skippedFiles++; continue; }
       if (["checkbox", "radio", "submit", "button", "reset", "password"].includes(el.type)) continue;
       const isSelect = el.tagName === "SELECT";
       const isCombo = !isSelect && (el.getAttribute("role") === "combobox" || el.getAttribute("aria-haspopup") === "listbox" || !!el.list);
       if (!isSelect && !isCombo && (el.readOnly || el.value)) continue;
       if (isSelect && el.selectedIndex > 0 && el.value) continue;
       if (isCombo && el.value) continue;
-      const value = findValue(fieldText(el), profile);
+      const value = safe(() => findValue(fieldText(el), profile), "");
       if (!value) continue;
 
       let done = false;
       if (isSelect) {
-        done = chooseSelect(el, value) || await chooseCustomDropdown(el, value);
+        done = safe(() => chooseSelect(el, value)) || await withTimeout(chooseCustomDropdown(el, value), 2500);
       } else if (isCombo) {
-        done = (el.list ? chooseDatalist(el, value) : false) || await chooseCustomDropdown(el, value);
-        if (!done && !el.readOnly) { setValue(el, value); done = true; }
+        done = (el.list ? safe(() => chooseDatalist(el, value)) : false) || await withTimeout(chooseCustomDropdown(el, value), 2500);
+        if (!done && !el.readOnly) { done = safe(() => { setValue(el, value); return true; }); }
       } else {
-        setValue(el, value); done = true;
+        done = safe(() => { setValue(el, value); return true; });
       }
       done ? filled++ : unmatchedDropdowns++;
+      } catch { errored++; }
     }
     sendResponse({
       message: `Filled ${filled} field${filled === 1 ? "" : "s"}.` +
         (resumesAttached ? ` Resume attached to ${resumesAttached} upload field${resumesAttached === 1 ? "" : "s"}.` : "") +
         (unmatchedDropdowns ? ` ${unmatchedDropdowns} dropdown${unmatchedDropdowns === 1 ? "" : "s"} had no matching option.` : "") +
+        (errored ? ` ${errored} field${errored === 1 ? "" : "s"} were skipped after errors.` : "") +
         (skippedFiles ? ` ${skippedFiles} file upload${skippedFiles === 1 ? "" : "s"} still need${skippedFiles === 1 ? "s" : ""} to be selected manually.` : "")
     });
   })();
